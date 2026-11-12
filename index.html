@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Valorant daily shop</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Barlow:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{--ink:#0f1923;--slab:#1a2632;--line:#2c3b4a;--paper:#ece8e1;--mute:#8b97a3;--red:#ff4655}
+*{box-sizing:border-box}
+body{margin:0;background:var(--ink);color:var(--paper);font:16px/1.55 Barlow,system-ui,sans-serif}
+main{max-width:960px;margin:0 auto;padding:40px 20px 80px}
+h1,.price,.timer b{font-family:"Barlow Condensed",Impact,sans-serif;font-weight:700;letter-spacing:.01em}
+header{display:flex;justify-content:space-between;align-items:flex-end;gap:16px;flex-wrap:wrap;margin-bottom:28px}
+h1{margin:0;font-size:clamp(44px,9vw,84px);line-height:.9}
+.timer{color:var(--mute);text-align:right}
+.timer b{display:block;font-size:clamp(32px,6vw,52px);color:var(--red);line-height:1}
+details{background:var(--slab);border-left:3px solid var(--red);padding:16px 20px;margin-bottom:28px}
+summary{cursor:pointer;font-weight:500}
+ol{padding-left:20px;max-width:64ch}
+label{display:block;margin:12px 0 4px;color:var(--mute);font-size:14px}
+input,select,textarea{width:100%;background:var(--ink);color:var(--paper);border:1px solid var(--line);padding:10px;font:inherit}
+textarea{min-height:70px}
+button,.btn{display:inline-block;background:var(--red);color:#fff;border:0;padding:10px 20px;font:600 18px "Barlow Condensed",sans-serif;cursor:pointer;text-decoration:none;margin-top:14px}
+:focus-visible{outline:2px solid var(--paper);outline-offset:2px}
+#status{min-height:1.5em;margin:0 0 16px;color:var(--mute)}
+#status.err{color:var(--red)}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px}
+.skin{background:var(--slab);border-left:3px solid var(--red);padding:16px;clip-path:polygon(0 0,100% 0,100% calc(100% - 20px),calc(100% - 20px) 100%,0 100%)}
+.skin img{display:block;width:100%;height:130px;object-fit:contain}
+.skin h2{margin:12px 0 4px;font-size:18px;font-weight:500}
+.price{font-size:30px;color:var(--red)}
+.price small{font-size:16px;color:var(--mute);margin-left:4px}
+.note{color:var(--mute);font-size:14px;max-width:64ch;margin-top:32px}
+</style>
+</head>
+<body>
+<main>
+<header>
+  <h1>Daily shop</h1>
+  <div class="timer" id="timer" hidden>Resets in <b id="clock">--:--:--</b></div>
+</header>
+
+<details id="setup" open>
+  <summary>Sign in</summary>
+  <ol>
+    <li>Open the Riot login page and sign in as usual.</li>
+    <li>You will land on a playvalorant.com page. Copy the full address from the address bar.</li>
+    <li>Paste it below and load your shop.</li>
+  </ol>
+  <a class="btn" id="login" target="_blank" rel="noopener">Open Riot login</a>
+  <label for="paste">Address you were sent to</label>
+  <textarea id="paste" placeholder="https://playvalorant.com/opt_in#access_token=..." spellcheck="false"></textarea>
+  <label for="worker">Your proxy URL (see README)</label>
+  <input id="worker" placeholder="https://valorant-shop.yourname.workers.dev">
+  <label for="region">Region</label>
+  <select id="region"><option value="eu">Europe</option><option value="na">North America</option><option value="ap">Asia Pacific</option><option value="kr">Korea</option></select>
+  <button id="go">Load my shop</button>
+</details>
+
+<p id="status" role="status"></p>
+<section class="grid" id="shop"></section>
+<p class="note">Your login token stays in this tab and is never saved. It expires after about an hour, so repeat the sign-in to refresh. This is an unofficial tool and is not affiliated with Riot Games.</p>
+</main>
+
+<script>
+const $=s=>document.querySelector(s);
+const LOGIN="https://auth.riotgames.com/authorize?client_id=play-valorant-web-prod&redirect_uri=https%3A%2F%2Fplayvalorant.com%2Fopt_in&response_type=token%20id_token&scope=account%20openid&nonce=1";
+const PLATFORM=btoa(JSON.stringify({platformType:"PC",platformOS:"Windows",platformOSVersion:"10.0.19042.1.256.64bit",platformChipset:"Unknown"}));
+const VP="85ad13f7-3d1b-5128-9eb2-7cd8ee0b5741";
+const get=k=>{try{return localStorage.getItem(k)}catch{return null}};
+const put=(k,v)=>{try{localStorage.setItem(k,v)}catch{}};
+$("#login").href=LOGIN;
+$("#worker").value=get("vs_worker")||"";
+$("#region").value=get("vs_region")||"eu";
+let tick;
+
+function parseToken(text){
+  text=text.trim();
+  if(!text) return null;
+  try{ const t=new URLSearchParams(new URL(text).hash.slice(1)).get("access_token"); if(t) return t; }catch{}
+  return /^[\w-]+\.[\w-]+\.[\w-]+$/.test(text)?text:null;
+}
+async function viaProxy(worker,url,opt={}){
+  const r=await fetch(worker+"/?u="+encodeURIComponent(url),opt);
+  if(!r.ok) throw new Error(r.status+" from "+new URL(url).hostname);
+  return r.json();
+}
+function say(msg,err){const s=$("#status");s.textContent=msg;s.className=err?"err":""}
+
+$("#go").onclick=async()=>{
+  const worker=$("#worker").value.trim().replace(/\/$/,""), region=$("#region").value, token=parseToken($("#paste").value);
+  try{
+    if(!worker) throw new Error("Add your proxy URL first.");
+    if(!token) throw new Error("No access token found. Paste the full address you were sent to after signing in.");
+    put("vs_worker",worker); put("vs_region",region);
+    say("Loading your shop…");
+    const auth={Authorization:"Bearer "+token}, call=(u,o)=>viaProxy(worker,u,o);
+    const [me,ent,ver]=await Promise.all([
+      call("https://auth.riotgames.com/userinfo",{headers:auth}),
+      call("https://entitlements.auth.riotgames.com/api/token/v1",{method:"POST",headers:{...auth,"Content-Type":"application/json"},body:"{}"}),
+      fetch("https://valorant-api.com/v1/version").then(r=>r.json())
+    ]);
+    const h={...auth,"X-Riot-Entitlements-JWT":ent.entitlements_token,"X-Riot-ClientVersion":ver.data.riotClientVersion,"X-Riot-ClientPlatform":PLATFORM};
+    const base=`https://pd.${region}.a.pvp.net/store/`;
+    let shop;
+    try{ shop=await call(`${base}v3/storefront/${me.sub}`,{method:"POST",headers:{...h,"Content-Type":"application/json"},body:"{}"}); }
+    catch{ shop=await call(`${base}v2/storefront/${me.sub}`,{headers:h}); }
+    const L=shop.SkinsPanelLayout;
+    const offers=L.SingleItemStoreOffers||L.SingleItemOffers.map(id=>({Rewards:[{ItemID:id}],Cost:{}}));
+    const skins=await Promise.all(offers.map(o=>fetch("https://valorant-api.com/v1/weapons/skinlevels/"+o.Rewards[0].ItemID).then(r=>r.json())));
+    render(offers,skins);
+    countdown(L.SingleItemOffersRemainingDurationInSeconds);
+    $("#setup").open=false; $("#paste").value=""; say("");
+  }catch(e){ say(e.message+" If this keeps happening, your token may have expired: sign in again.",true); }
+};
+
+function render(offers,skins){
+  const grid=$("#shop"); grid.replaceChildren();
+  offers.forEach((o,i)=>{
+    const d=skins[i].data||{}, price=o.Cost&&(o.Cost[VP]??Object.values(o.Cost)[0]);
+    const card=document.createElement("article"); card.className="skin";
+    if(d.displayIcon){const img=document.createElement("img");img.src=d.displayIcon;img.alt="";card.append(img);}
+    const h=document.createElement("h2"); h.textContent=d.displayName||"Unknown skin"; card.append(h);
+    if(price!=null){const p=document.createElement("div");p.className="price";p.textContent=price.toLocaleString();const s=document.createElement("small");s.textContent="VP";p.append(s);card.append(p);}
+    grid.append(card);
+  });
+}
+function countdown(secs){
+  clearInterval(tick);
+  const end=Date.now()+secs*1000; $("#timer").hidden=false;
+  const f=()=>{const s=Math.max(0,Math.round((end-Date.now())/1000));
+    $("#clock").textContent=[s/3600|0,(s%3600)/60|0,s%60].map(n=>String(n).padStart(2,"0")).join(":");};
+  f(); tick=setInterval(f,1000);
+}
+</script>
+</body>
+</html>
