@@ -32,6 +32,9 @@ button,.btn{display:inline-block;background:var(--red);color:#fff;border:0;paddi
 .skin h2{margin:12px 0 4px;font-size:18px;font-weight:500}
 .price{font-size:30px;color:var(--red)}
 .price small{font-size:16px;color:var(--mute);margin-left:4px}
+#nm{margin-top:56px}#nm h1{font-size:clamp(32px,6vw,52px)}
+.pct{background:var(--red);color:#fff;font:700 18px "Barlow Condensed",sans-serif;padding:0 8px;margin-left:10px;vertical-align:4px}
+.price s{color:var(--mute);font-size:18px;margin-left:10px}
 .note{color:var(--mute);font-size:14px;max-width:64ch;margin-top:32px}
 </style>
 </head>
@@ -61,6 +64,10 @@ button,.btn{display:inline-block;background:var(--red);color:#fff;border:0;paddi
 
 <p id="status" role="status"></p>
 <section class="grid" id="shop"></section>
+<div id="nm" hidden>
+  <header><h1>Night market</h1><div class="timer">Ends in <b id="nmclock">--:--:--</b></div></header>
+  <section class="grid" id="night"></section>
+</div>
 <p class="note">Your login token stays in this tab and is never saved. It expires after about an hour, so repeat the sign-in to refresh. This is an unofficial tool and is not affiliated with Riot Games.</p>
 </main>
 
@@ -74,7 +81,7 @@ const put=(k,v)=>{try{localStorage.setItem(k,v)}catch{}};
 $("#login").href=LOGIN;
 $("#worker").value=get("vs_worker")||"";
 $("#region").value=get("vs_region")||"eu";
-let tick;
+const ticks={};
 
 function parseToken(text){
   text=text.trim();
@@ -110,29 +117,43 @@ $("#go").onclick=async()=>{
     const L=shop.SkinsPanelLayout;
     const offers=L.SingleItemStoreOffers||L.SingleItemOffers.map(id=>({Rewards:[{ItemID:id}],Cost:{}}));
     const skins=await Promise.all(offers.map(o=>fetch("https://valorant-api.com/v1/weapons/skinlevels/"+o.Rewards[0].ItemID).then(r=>r.json())));
-    render(offers,skins);
-    countdown(L.SingleItemOffersRemainingDurationInSeconds);
+    const price=o=>Object.values(o||{})[0];
+    render("#shop",offers.map((o,i)=>({skin:skins[i],price:o.Cost&&(o.Cost[VP]??price(o.Cost))})));
+    countdown(L.SingleItemOffersRemainingDurationInSeconds,"#clock","#timer");
+    const nm=(shop.BonusStore&&shop.BonusStore.BonusStoreOffers)||[];
+    $("#nm").hidden=true;
+    if(nm.length){
+      const ns=await Promise.all(nm.map(b=>fetch("https://valorant-api.com/v1/weapons/skinlevels/"+b.Offer.Rewards[0].ItemID).then(r=>r.json())));
+      render("#night",nm.map((b,i)=>({skin:ns[i],price:price(b.DiscountCosts),was:price(b.Offer.Cost),pct:b.DiscountPercent})));
+      countdown(shop.BonusStore.BonusStoreRemainingDurationInSeconds,"#nmclock","#nm");
+    }
     $("#setup").open=false; $("#paste").value=""; say("");
   }catch(e){ say(e.message+" If this keeps happening, your token may have expired: sign in again.",true); }
 };
 
-function render(offers,skins){
-  const grid=$("#shop"); grid.replaceChildren();
-  offers.forEach((o,i)=>{
-    const d=skins[i].data||{}, price=o.Cost&&(o.Cost[VP]??Object.values(o.Cost)[0]);
+function render(sel,items){
+  const grid=$(sel); grid.replaceChildren();
+  items.forEach(({skin,price,was,pct})=>{
+    const d=skin.data||{};
     const card=document.createElement("article"); card.className="skin";
     if(d.displayIcon){const img=document.createElement("img");img.src=d.displayIcon;img.alt="";card.append(img);}
     const h=document.createElement("h2"); h.textContent=d.displayName||"Unknown skin"; card.append(h);
-    if(price!=null){const p=document.createElement("div");p.className="price";p.textContent=price.toLocaleString();const s=document.createElement("small");s.textContent="VP";p.append(s);card.append(p);}
+    if(price!=null){
+      const p=document.createElement("div"); p.className="price"; p.textContent=price.toLocaleString();
+      const u=document.createElement("small"); u.textContent="VP"; p.append(u);
+      if(was!=null&&was!==price){const w=document.createElement("s"); w.textContent=was.toLocaleString(); p.append(w);}
+      if(pct){const b=document.createElement("span"); b.className="pct"; b.textContent="\u2212"+pct+"%"; p.append(b);}
+      card.append(p);
+    }
     grid.append(card);
   });
 }
-function countdown(secs){
-  clearInterval(tick);
-  const end=Date.now()+secs*1000; $("#timer").hidden=false;
+function countdown(secs,clock,wrap){
+  clearInterval(ticks[clock]);
+  const end=Date.now()+secs*1000; $(wrap).hidden=false;
   const f=()=>{const s=Math.max(0,Math.round((end-Date.now())/1000));
-    $("#clock").textContent=[s/3600|0,(s%3600)/60|0,s%60].map(n=>String(n).padStart(2,"0")).join(":");};
-  f(); tick=setInterval(f,1000);
+    $(clock).textContent=[s/3600|0,(s%3600)/60|0,s%60].map(n=>String(n).padStart(2,"0")).join(":");};
+  f(); ticks[clock]=setInterval(f,1000);
 }
 </script>
 </body>
